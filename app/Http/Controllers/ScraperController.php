@@ -8,6 +8,9 @@ use Illuminate\Foundation\Validation\ValidatesRequests;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 
 use Goutte\Client;
+use App\links;
+use App\products;
+
 
 class ScraperController extends BaseController
 {
@@ -34,7 +37,13 @@ class ScraperController extends BaseController
         //array of objects--collection of links
         // $sectionsLinks = $crawler->filter('.category-box a')->links();
         $this->excludedLinks = array("/diy_videos");
+        $linksObj = new links();
         $data = $crawler->filter('.category-box a')->each(function($node) {
+            $linksObj = new links();
+            $linksObj->link = $node->attr('href');
+            $linksObj->hierarchy = 1;
+            $linksObj->text = trim($node->text());
+            $linksObj->save();
             return $this->clickOnLinks($node);
         });
         $data = array_filter($data, function($element) {
@@ -144,8 +153,13 @@ class ScraperController extends BaseController
 
             $sectionPage = $this->client->click($link);
             $products = $sectionPage->filter('h2.product-name a')->each(function($product, $i) {
+                $linksObj = new links();
+                $linksObj->link = $product->attr('href');
+                $linksObj->hierarchy = 2;
+                $linksObj->text = trim($product->text());
+                $linksObj->save();
                 $this->printLog(array("link" => $product->attr('href'), "text" => $product->text()));
-                return array("name" => $product->text(), "link" => $product->attr('href'));
+                return $this->getProductData($product->link());
             });
             $productsNextPage = $sectionPage->filter('a.next.i-next');
             $nextPage = $this->clickOnLinks($productsNextPage);
@@ -159,22 +173,21 @@ class ScraperController extends BaseController
                 "products" => array_merge($products,  $nextPage)
             );
         }
+        return array();
     }
-    private function getProducts($linkObj) {
-        $text = $section->text();
-        $link = $section->link();
+    private function getProductData($linkObj) {
+        // $text = $linkObj->text();
+        $link = $linkObj->getUri();
 
-        if(!$this->isLinkDuplicate($link->attr('href'))) {
-            $productsPage = $this->client->click($linkObj);
-            $products = $productsPage->filter('h2.product-name a')->each(function($product, $i) {
-                // $this->printLog(array("link" => $product->attr('href'), "text" => $product->text()));
-                return array("name" => $product->text(), "link" => $product->attr('href'));
-            });
-            $productsNextPage = $productsPage->filter('a.next.i-next');
-            $this->getProducts($productsNextPage);
-            return $products;
+        if(!$this->isLinkDuplicate($link)) {
+            $productPage = $this->client->click($linkObj);
+            return array(
+                "name" => $productPage->filter('.product-name .h1')->text(),
+                "part_num" => $productPage->filter('.product-sku p')->text(),
+                "part_brand" => $productPage->filter('product-sku.brand p')->count() > 0 ? $productPage->filter('product-sku.brand p')->text() : "",
+                "quantity" => $productPage->filter('.availability.in-stock .value')->count() > 0 ? $productPage->filter('.availability.in-stock .value')->text() : "",
+                "description" => $productPage->filter('.box-collateral.box-description .box-collateral.box-description')->count() > 0 ? $productPage->filter('.box-collateral.box-description .box-collateral.box-description')->text() : ""   
+            );
         }
-        return;
-        
     }
 }
